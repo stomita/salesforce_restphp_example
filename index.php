@@ -6,6 +6,7 @@ A minimal example showing how to handle the OAuth login process and make API cal
 using the Salesforce REST interface in PHP
 
 By Pete Warden, October 28th 2010
+Modified By Shinichi Tomita, March 23th, 2011
 
 Freely reusable with no restrictions
 
@@ -14,7 +15,9 @@ Freely reusable with no restrictions
 // You need to set these three to the values for your own application
 define('CONSUMER_KEY', '');
 define('CONSUMER_SECRET', '');
-define('REDIRECT_URI', 'https://Your site here!/salesforce_restphp_example/index.php');
+define('USERNAME', 'username@company.example.org');
+define('PASSWORD', 'yourpassword');
+
 
 define('LOGIN_BASE_URL', 'https://login.salesforce.com');
 
@@ -29,38 +32,16 @@ $is_authorized = isset($_SESSION['access_token']);
 // or they've just logged in and Salesforce is giving us the tokens we need
 if (!$is_authorized)
 {
-    $has_code = isset($_REQUEST['code']);
-
-    // We haven't been given a code, so this must be the user's first visit to the
-    // page, so we'll send them to the Salesforce login screen for our app
-    if (!$has_code)
-    {
-        $auth_url = LOGIN_BASE_URL
-            .'/services/oauth2/authorize?response_type=code'
-            .'&client_id='.CONSUMER_KEY 
-            .'&redirect_uri='.urlencode(REDIRECT_URI);
-            
-        // Redirect to the authorization page
-        header('Location: '.$auth_url);
-        
-        // Exit early, since we don't want to do any more until the user's logged in
-        exit();
-    }
-
-    // If we're here, Salesforce must be returning us a code that we can exchange for
-    // a proper access token
-    $code = $_REQUEST['code'];
-
     // Make our first call to the API to convert that code into an access token that
     // we can use on subsequent API calls
     $token_url = LOGIN_BASE_URL.'/services/oauth2/token';
 
     $post_fields = array(
-        'code' => $code,
-        'grant_type' => 'authorization_code',
+        'grant_type' => 'password',
         'client_id' => CONSUMER_KEY,
         'client_secret' => CONSUMER_SECRET,
-        'redirect_uri' => REDIRECT_URI,
+        'username' => USERNAME,
+        'password' => PASSWORD
     );
 
     $ch = curl_init();
@@ -69,10 +50,13 @@ if (!$is_authorized)
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, TRUE);
     curl_setopt($ch, CURLOPT_POST, TRUE);
     curl_setopt($ch, CURLOPT_POSTFIELDS, $post_fields);
+
+    // Set option if SSL verification fails (not recommended)
+    // curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
     
     // Make the API call, and then extract the information from the response
-    $token_request_body = curl_exec($ch) 
-        or die("Call to get token from code failed: '$token_url' - ".print_r($post_fields, true));
+    $token_request_body = curl_exec($ch)
+      or die("Call to get token from code failed: '$token_url' - ".print_r($post_fields, true)."<br/>".curl_error($ch));
 
     $token_response_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     if (($token_response_code<200)||($token_response_code>=300)||empty($token_request_body))
@@ -90,9 +74,6 @@ if (!$is_authorized)
     $_SESSION['access_token'] = $token_request_data['access_token'];
     $_SESSION['instance_url'] = $token_request_data['instance_url'];
 
-    // Redirect to the main page without the code in the URL
-    header('Location: '.REDIRECT_URI);
-    exit();
 }
 
 // If we're here, we must have a valid session containing the access token for the
@@ -104,10 +85,10 @@ error_log("access_token: '$access_token'");
 
 // Now we're going to test the API by querying some data from our accounts table
 // Start by specifying the URL of the call
-$query_url = $instance_url.'/services/data/v20.0/query';
+$query_url = $instance_url.'/services/data/v21.0/query';
 
 // Now append the actual query we want to run
-$query_url .= '?q='.urlencode('SELECT Name, Id from Account LIMIT 100');
+$query_url .= '?q='.urlencode('SELECT Id, Name FROM Account LIMIT 100');
 
 $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, $query_url);
@@ -115,9 +96,12 @@ curl_setopt($ch, CURLOPT_RETURNTRANSFER, TRUE);
 // We need to pass the access token in the header, *not* as a URL parameter
 curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: OAuth '.$access_token));
 
+// Set option if SSL verification fails (not recommended)
+// curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0);
+ 
 // Make the API call, and then extract the information from the response
 $query_request_body = curl_exec($ch) 
-    or die("Query API call failed: '$query_url'");
+    or die("Query API call failed: '$query_url'<br/>".curl_error($ch));
 
 $query_response_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 if (($query_response_code<200)||($query_response_code>=300)||empty($query_request_body))
